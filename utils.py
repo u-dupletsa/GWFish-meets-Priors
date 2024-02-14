@@ -6,6 +6,10 @@ import pesummary
 from pesummary.io import read
 import pickle
 import yaml
+import GWFish.modules as gw
+import json
+from tqdm import tqdm
+
 
 
 def keys(f):
@@ -71,7 +75,8 @@ def check_and_store_priors(PATH_TO_DATA, PATH_TO_RESULTS, events_list, waveform)
         pickle.dump(chirp_mass_priors, f)
 
 def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_TO_PSD, events_list, waveform):
-    dict_file = {'L1':{'lat':30.56 * np.pi / 180.,
+
+    dict_template = {'L1':{'lat':30.56 * np.pi / 180.,
                     'lon':-90.77 * np.pi / 180.,
                     'opening_angle':np.pi / 2.,
                     'azimuth':197.7 * np.pi / 180.,
@@ -115,13 +120,13 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
     detectors = {}
     for event in events_list:
 
-        local_dictionary = dict_file
+        local_dictionary = dict_template.copy()
 
         data = h5py.File(PATH_TO_DATA + event + '.h5', 'r')
         detectors[event] = keys(data['C01:' + waveform]['psds'])
 
         for j in range(len(detectors[event])):
-            local_dictionary[detectors[event][j]] = {'psd_data':'PSDs4GWFish/%s/psd_%s_%s.txt' %(waveform, event, detectors[event][j])}
+            local_dictionary[detectors[event][j]].update({'psd_data':PATH_TO_PSD + 'psd_%s_%s_%s.txt' %(waveform, event, detectors[event][j])})
 
             np.savetxt(PATH_TO_PSD + 'psd_%s_%s_%s.txt' %(waveform, event, detectors[event][j]), 
                        np.c_[data['C01:' + waveform]['psds'][detectors[event][j]][:, 0], 
@@ -136,4 +141,88 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
 
 
 
-def gwfish_analysis()
+def gwfish_analysis(PATH_TO_YAML, PATH_TO_INJECTIONS, events_list, waveform, estimator,
+                    detectors, fisher_parameters, calculate_errors = True, duty_cycle = False):
+
+    for event in tqdm(events_list):
+
+        population = '%s_BBH_%s' %(estimator, event)
+
+        detectors_list = detectors[event]
+        detectors_event = []
+        for j in range(len(detectors_list)):
+            detectors_event.append(detectors_list[j])
+        networks = np.linspace(0, len(detectors_event) - 1, len(detectors_event), dtype=int)
+        networks = str([networks.tolist()])
+
+        detectors_ids = np.array(detectors_event)
+        networks_ids = json.loads(networks)
+        ConfigDet = os.path.join(PATH_TO_YAML + event + '.yaml')
+
+
+        waveform_model = waveform
+        waveform_class = gw.waveforms.LALFD_Waveform
+
+        gw_parameters = pd.read_hdf(PATH_TO_INJECTIONS + event +  '/%s_%s_%s.hdf5' %(event, waveform, estimator))
+        gw_parameters['mass1_lvk'] = gw_parameters['mass_1']
+        gw_parameters['mass2_lvk'] = gw_parameters['mass_2']
+        gw_parameters['mass_1'], gw_parameters['mass_2'] = from_mChirp_q_to_m1_m2(gw_parameters['chirp_mass'], gw_parameters['mass_ratio'])
+
+        threshold_SNR = np.array([0., 1.])
+        network = gw.detection.Network(detectors_ids, detection_SNR=threshold_SNR, parameters=gw_parameters,
+                                    fisher_parameters=fisher_parameters, config=ConfigDet)
+        k = 0
+        parameter_values = gw_parameters.iloc[k]
+
+        networkSNR_sq = 0
+        for d in np.arange(len(network.detectors)):
+            data_params = {
+                'frequencyvector': network.detectors[d].frequencyvector,
+                'f_ref': 50.
+            }
+            waveform_obj = waveform_class(waveform_model, parameter_values, data_params)
+            wave = waveform_obj()
+            t_of_f = waveform_obj.t_of_f
+
+            signal = gw.detection.projection(parameter_values, network.detectors[d], wave, t_of_f)
+
+            SNRs = gw.detection.SNR(network.detectors[d], signal, duty_cycle=duty_cycle)
+            networkSNR_sq += np.sum(SNRs ** 2)
+            network.detectors[d].SNR[k] = np.sqrt(np.sum(SNRs ** 2))
+
+            if calculate_errors:
+                network.detectors[d].fisher_matrix[k, :, :] = \
+                    gw.fishermatrix.FisherMatrix(waveform_model, parameter_values, fisher_parameters, network.detectors[d], waveform_class=waveform_class).fm
+
+        network.SNR[k] = np.sqrt(networkSNR_sq)
+
+        gw.detection.analyzeDetections(network, gw_parameters, population, networks_ids)
+        if calculate_errors:
+            gw.fishermatrix.analyzeFisherErrors(network, gw_parameters, fisher_parameters, population, networks_ids)
+
+
+def from_m1_m2_to_mChirp_q(m1, m2):
+    """
+    Compute the transformation from m1, m2 to mChirp, q
+    """
+    mChirp = (m1 * m2)**(3/5) / (m1 + m2)**(1/5)
+    q = m2 / m1
+    return mChirp, q
+
+def from_mChirp_q_to_m1_m2(mChirp, q):
+    """
+    Compute the transformation from mChirp, q to m1, m2
+    """
+    m1 = mChirp * (1 + q)**(1/5) * q**(-3/5)
+    m2 = mChirp * (1 + q)**(1/5) * q**(3/5)
+    return m1, m2
+
+
+def jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2):
+    """
+    Compute the Jacobian for the transformation from m1, m2 to mChirp, q
+    """
+    mChirp = (m1 * m2)**(3/5) / (m1 + m2)**(1/5)
+    q = m1 / m2
+    jacobian = np.array([[mChirp / m1, mChirp / m2], [-q / m2, q / m1]])
+    return jacobian
