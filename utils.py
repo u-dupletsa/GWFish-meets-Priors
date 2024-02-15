@@ -9,6 +9,7 @@ import yaml
 import GWFish.modules as gw
 import json
 from tqdm import tqdm
+from minimax_tilting_sampler import *
 
 
 
@@ -217,12 +218,109 @@ def from_mChirp_q_to_m1_m2(mChirp, q):
     m2 = mChirp * (1 + q)**(1/5) * q**(3/5)
     return m1, m2
 
+def derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q):
+    """
+    Compute the derivative of m1, m2 with respect to mChirp, q
+    """
+    dm1_dmChirp = (1 + q)**(1/5) * q**(-3/5)
+    dm1_dq = mChirp * (1 + q)**(1/5) * (-3/5) * q**(-8/5) + mChirp * (1 + q)**(-4/5) * q**(-3/5)
+    dm2_dmChirp = (1 + q)**(1/5) * q**(3/5)
+    dm2_dq = mChirp * (1 + q)**(1/5) * (3/5) * q**(2/5) + mChirp * (1 + q)**(-4/5) * q**(3/5)
+    return dm1_dmChirp, dm1_dq, dm2_dmChirp, dm2_dq
 
-def jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2):
+
+def jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2, fisher_matrix):
     """
     Compute the Jacobian for the transformation from m1, m2 to mChirp, q
     """
-    mChirp = (m1 * m2)**(3/5) / (m1 + m2)**(1/5)
-    q = m1 / m2
-    jacobian = np.array([[mChirp / m1, mChirp / m2], [-q / m2, q / m1]])
-    return jacobian
+    mChirp, q = from_m1_m2_to_mChirp_q(m1, m2)
+    dm1_dmChirp, dm1_dq, dm2_dmChirp, dm2_dq = derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q)
+    rotated_fisher = fisher_matrix.copy()
+    rotated_fisher[0, 0, 0] *= dm1_dmChirp**2
+    rotated_fisher[0, 1, 1] *= dm2_dq**2
+    rotated_fisher[0, 0, 1] *= dm1_dmChirp * dm2_dq
+    rotated_fisher[0, 1, 0] *= dm1_dmChirp * dm2_dq
+    rotated_fisher[0, 0, 2:] *= dm1_dmChirp
+    rotated_fisher[0, 1, 2:] *= dm2_dq
+    rotated_fisher[0, 2:, 0] *= dm1_dmChirp
+    rotated_fisher[0, 2:, 1] *= dm2_dq
+
+    #nparams = len(fisher_parameters)
+    #jacobian = np.identity((nparams))
+
+    #jacobian[np.ix_([fisher_parameters.index('mass_1'), fisher_parameters.index('mass_1')], [fisher_parameters.index('mass_1'), fisher_parameters.index('mass_1')])] = derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q)
+
+    # Write the jacobian matrix to pass from the fisher matrix in m1 and m2 to fisher in mChirp and q
+    #rotated_fisher = jacobian.T@old_fisher@jacobian
+    return rotated_fisher
+
+def get_rotated_fisher_matrix(PATH_TO_FISHERS, PATH_TO_RESULTS, events_list, detectors_list, estimator, lbs_signals, lbs_errs, new_fisher_parameters):
+   
+    for event in events_list:
+        signals = pd.read_csv(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/signals/' +
+                            'Signals_%s_BBH_%s.txt' %(estimator, event), names = lbs_signals, skiprows = 1,
+                            delimiter = ' ')
+        detectors_labels = list(detectors_list[event])
+        connector = '_'
+        label = detectors_labels[0]
+        for j in range(1, len(detectors_labels)):
+            label += connector + detectors_labels[j]
+
+        fishers = np.load(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/fishers/' + 
+                          'Fishers_%s_%s_BBH_%s_SNR1.0.npy' %(label, estimator, event))
+        m1, m2 = signals[['mass_1', 'mass_2']].iloc[0]
+        rotated_fisher = jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2, fishers)
+        np.save(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/rotated_fishers/' + 
+                'Rot_Fishers_%s_%s_BBH_%s_SNR1.0.npy' %(label, estimator, event), rotated_fisher)
+
+        inv_rotated_fisher, sing_values = gw.fishermatrix.invertSVD(rotated_fisher[0, :, :])
+        np.save(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/rotated_inv_fishers/' + 
+                'Rot_Inv_Fishers_%s_%s_BBH_%s_SNR1.0.npy' %(label, estimator, event), inv_rotated_fisher)
+        
+        
+        old_errors = pd.read_csv(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/errors/' + 
+                                 'Errors_%s_%s_BBH_%s_SNR1.0.txt' %(label, estimator, event), names = lbs_errs, 
+                                 skiprows = 1, delimiter = ' ')
+        new_errors = old_errors.copy()
+
+        err_params = []
+        for l in range(len(new_fisher_parameters)):
+            err_params.append('err_' + new_fisher_parameters[l])
+        new_errors[err_params] = np.sqrt(np.diag(inv_rotated_fisher))
+        np.savetxt(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/rotated_errors/' +
+                'Errors_%s_%s_BBH_%s_SNR1.0.txt' %(label, estimator, event), new_errors, delimiter = ' ', 
+                fmt = '%.15f', header = '# ' + ' '.join(new_errors.keys()), comments = '')
+
+
+def get_samples_from_MVN(means, cov, N):
+    """
+    Draw samples from a multivariate normal distribution
+    """
+    return np.random.multivariate_normal(means, cov, N)
+
+def get_samples_from_TMVN(min_array, max_array, means, cov, N):
+    """
+    Draw samples from a truncated multivariate normal distribution
+    """
+    tmvn = TruncatedMVN(means, cov, min_array, max_array)
+    return tmvn.sample(N)
+
+def get_posteriors(samples, params, priors_dict, min_array, max_array, N):
+    """
+    Draw samples from a multivariate normal distribution with priors
+    """
+    samples['priors'] = np.ones_like(samples[params[0]])
+    for param in params:
+        samples['priors'] *= priors_dict[param](samples[param], lower_bound = min_array[param], upper_bound = max_array[param])
+
+    samples['weights'] = samples['priors'] / np.sum(samples['priors'])
+    prob = samples['weights'].to_numpy()
+    index = np.random.choice(np.arange(N), size = N, replace = True, p = prob)
+    posteriors = samples.iloc[index]
+    
+    return posteriors
+
+def get_lvk_samples():
+
+
+
