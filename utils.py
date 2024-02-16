@@ -321,6 +321,8 @@ def get_posteriors(samples, params, priors_dict, min_array, max_array, N):
     return posteriors
 
 def get_lvk_samples():
-
-
+    """
+    Get the LVK samples
+    """
+    samples = pd.read_hdf(PATH_TO_IN
 
