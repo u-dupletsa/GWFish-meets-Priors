@@ -143,10 +143,9 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
 
 
 def gwfish_analysis(PATH_TO_YAML, PATH_TO_INJECTIONS, events_list, waveform, estimator,
-                    detectors, fisher_parameters, calculate_errors = True, duty_cycle = False):
+                    detectors, fisher_parameters, PATH_TO_RESULTS):
 
-    for event in tqdm(events_list):
-
+    for event in events_list:
         population = '%s_BBH_%s' %(estimator, event)
 
         detectors_list = detectors[event]
@@ -162,44 +161,21 @@ def gwfish_analysis(PATH_TO_YAML, PATH_TO_INJECTIONS, events_list, waveform, est
 
 
         waveform_model = waveform
-        waveform_class = gw.waveforms.LALFD_Waveform
-
         gw_parameters = pd.read_hdf(PATH_TO_INJECTIONS + event +  '/%s_%s_%s.hdf5' %(event, waveform, estimator))
         gw_parameters['mass1_lvk'] = gw_parameters['mass_1']
         gw_parameters['mass2_lvk'] = gw_parameters['mass_2']
         gw_parameters['mass_1'], gw_parameters['mass_2'] = from_mChirp_q_to_m1_m2(gw_parameters['chirp_mass'], gw_parameters['mass_ratio'])
 
-        threshold_SNR = np.array([0., 1.])
-        network = gw.detection.Network(detectors_ids, detection_SNR=threshold_SNR, parameters=gw_parameters,
-                                    fisher_parameters=fisher_parameters, config=ConfigDet)
-        k = 0
-        parameter_values = gw_parameters.iloc[k]
+        network = gw.detection.Network(detectors_ids, detection_SNR=(0., 1.), config=ConfigDet)
+        gw.fishermatrix.analyze_and_save_to_txt(network = network,
+                                        parameter_values  = gw_parameters,
+                                        fisher_parameters = fisher_parameters, 
+                                        sub_network_ids_list = networks_ids,
+                                        population_name = population,
+                                        waveform_model = waveform_model,
+                                        save_path = PATH_TO_RESULTS,
+                                        save_matrices = True)
 
-        networkSNR_sq = 0
-        for d in np.arange(len(network.detectors)):
-            data_params = {
-                'frequencyvector': network.detectors[d].frequencyvector,
-                'f_ref': 50.
-            }
-            waveform_obj = waveform_class(waveform_model, parameter_values, data_params)
-            wave = waveform_obj()
-            t_of_f = waveform_obj.t_of_f
-
-            signal = gw.detection.projection(parameter_values, network.detectors[d], wave, t_of_f)
-
-            SNRs = gw.detection.SNR(network.detectors[d], signal, duty_cycle=duty_cycle)
-            networkSNR_sq += np.sum(SNRs ** 2)
-            network.detectors[d].SNR[k] = np.sqrt(np.sum(SNRs ** 2))
-
-            if calculate_errors:
-                network.detectors[d].fisher_matrix[k, :, :] = \
-                    gw.fishermatrix.FisherMatrix(waveform_model, parameter_values, fisher_parameters, network.detectors[d], waveform_class=waveform_class).fm
-
-        network.SNR[k] = np.sqrt(networkSNR_sq)
-
-        gw.detection.analyzeDetections(network, gw_parameters, population, networks_ids)
-        if calculate_errors:
-            gw.fishermatrix.analyzeFisherErrors(network, gw_parameters, fisher_parameters, population, networks_ids)
 
 
 def from_m1_m2_to_mChirp_q(m1, m2):
