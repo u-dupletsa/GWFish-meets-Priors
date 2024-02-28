@@ -10,6 +10,7 @@ import GWFish.modules as gw
 import json
 from tqdm import tqdm
 from minimax_tilting_sampler import *
+import priors
 
 
 
@@ -191,7 +192,7 @@ def from_mChirp_q_to_m1_m2(mChirp, q):
     Compute the transformation from mChirp, q to m1, m2
     """
     m1 = mChirp * (1 + q)**(1/5) * q**(-3/5)
-    m2 = mChirp * (1 + q)**(1/5) * q**(3/5)
+    m2 = mChirp * (1 + q)**(1/5) * q**(2/5)
     return m1, m2
 
 def derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q):
@@ -199,9 +200,9 @@ def derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q):
     Compute the derivative of m1, m2 with respect to mChirp, q
     """
     dm1_dmChirp = (1 + q)**(1/5) * q**(-3/5)
-    dm1_dq = mChirp * (1 + q)**(1/5) * (-3/5) * q**(-8/5) + mChirp * (1 + q)**(-4/5) * q**(-3/5)
-    dm2_dmChirp = (1 + q)**(1/5) * q**(3/5)
-    dm2_dq = mChirp * (1 + q)**(1/5) * (3/5) * q**(2/5) + mChirp * (1 + q)**(-4/5) * q**(3/5)
+    dm1_dq = mChirp * (1 + q)**(1/5) * (-3/5) * q**(-8/5) + mChirp * (1/5) * (1 + q)**(-4/5) * q**(-3/5)
+    dm2_dmChirp = (1 + q)**(1/5) * q**(2/5)
+    dm2_dq = mChirp * (1 + q)**(1/5) * (2/5) * q**(-3/5) + mChirp * (1/5) * (1 + q)**(-4/5) * q**(2/5)
     return dm1_dmChirp, dm1_dq, dm2_dmChirp, dm2_dq
 
 
@@ -212,14 +213,16 @@ def jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2, fisher_matrix):
     mChirp, q = from_m1_m2_to_mChirp_q(m1, m2)
     dm1_dmChirp, dm1_dq, dm2_dmChirp, dm2_dq = derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q)
     rotated_fisher = fisher_matrix.copy()
-    rotated_fisher[0, 0, 0] *= dm1_dmChirp**2
-    rotated_fisher[0, 1, 1] *= dm2_dq**2
-    rotated_fisher[0, 0, 1] *= dm1_dmChirp * dm2_dq
-    rotated_fisher[0, 1, 0] *= dm1_dmChirp * dm2_dq
-    rotated_fisher[0, 0, 2:] *= dm1_dmChirp
-    rotated_fisher[0, 1, 2:] *= dm2_dq
-    rotated_fisher[0, 2:, 0] *= dm1_dmChirp
-    rotated_fisher[0, 2:, 1] *= dm2_dq
+    jacobian_matrix = np.zeros_like(fisher_matrix)
+    nparams = len(fisher_matrix[0, 0, :])
+    for i in range(nparams):
+        jacobian_matrix[0, i, i] = 1
+    jacobian_matrix[0, 0, 0] = dm1_dmChirp
+    jacobian_matrix[0, 0, 1] = dm1_dq
+    jacobian_matrix[0, 1, 0] = dm2_dmChirp
+    jacobian_matrix[0, 1, 1] = dm2_dq
+
+    rotated_fisher = jacobian_matrix[0, :, :].T @ rotated_fisher[0, :, :] @ jacobian_matrix[0, :, :]
 
     #nparams = len(fisher_parameters)
     #jacobian = np.identity((nparams))
@@ -228,51 +231,53 @@ def jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2, fisher_matrix):
 
     # Write the jacobian matrix to pass from the fisher matrix in m1 and m2 to fisher in mChirp and q
     #rotated_fisher = jacobian.T@old_fisher@jacobian
-    return rotated_fisher
+    return rotated_fisher[np.newaxis, :, :]
 
-def get_rotated_fisher_matrix(PATH_TO_FISHERS, PATH_TO_RESULTS, events_list, detectors_list, estimator, lbs_signals, lbs_errs, new_fisher_parameters):
+def get_rotated_fisher_matrix(PATH_TO_RESULTS, events_list, detectors_list, estimator, lbs_errs, new_fisher_parameters):
    
     for event in events_list:
-        signals = pd.read_csv(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/signals/' +
-                            'Signals_%s_BBH_%s.txt' %(estimator, event), names = lbs_signals, skiprows = 1,
-                            delimiter = ' ')
-        detectors_labels = list(detectors_list[event])
-        connector = '_'
-        label = detectors_labels[0]
-        for j in range(1, len(detectors_labels)):
-            label += connector + detectors_labels[j]
 
-        fishers = np.load(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/fishers/' + 
-                          'Fishers_%s_%s_BBH_%s_SNR1.0.npy' %(label, estimator, event))
+        label = get_label(detectors_list, event, estimator, 'errors')
+
+        signals = pd.read_csv(PATH_TO_RESULTS + 'results/gwfish_m1_m2/' +
+                            get_label(detectors_list, event, estimator, 'errors'), names = lbs_errs, skiprows = 1,
+                            delimiter = ' ')
+        
+        fishers = np.load(PATH_TO_RESULTS + 'results/gwfish_m1_m2/' + 
+                         get_label(detectors_list, event, estimator, 'fishers'))
         m1, m2 = signals[['mass_1', 'mass_2']].iloc[0]
         rotated_fisher = jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2, fishers)
-        np.save(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/rotated_fishers/' + 
-                'Rot_Fishers_%s_%s_BBH_%s_SNR1.0.npy' %(label, estimator, event), rotated_fisher)
+        np.save(PATH_TO_RESULTS + 'results/gwfish_rotated/' + 
+                get_label(detectors_list, event, estimator, 'fishers'), rotated_fisher)
 
-        inv_rotated_fisher, sing_values = gw.fishermatrix.invertSVD(rotated_fisher[0, :, :])
-        np.save(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/rotated_inv_fishers/' + 
-                'Rot_Inv_Fishers_%s_%s_BBH_%s_SNR1.0.npy' %(label, estimator, event), inv_rotated_fisher)
+        inv_rotated_fisher, _ = gw.fishermatrix.invertSVD(rotated_fisher[0, :, :])
+        np.save(PATH_TO_RESULTS + 'results/gwfish_rotated/' + 
+                get_label(detectors_list, event, estimator, 'inv_fishers'), inv_rotated_fisher)
         
-        
-        old_errors = pd.read_csv(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/errors/' + 
-                                 'Errors_%s_%s_BBH_%s_SNR1.0.txt' %(label, estimator, event), names = lbs_errs, 
-                                 skiprows = 1, delimiter = ' ')
-        new_errors = old_errors.copy()
+        new_errors = signals.copy()
 
         err_params = []
         for l in range(len(new_fisher_parameters)):
             err_params.append('err_' + new_fisher_parameters[l])
         new_errors[err_params] = np.sqrt(np.diag(inv_rotated_fisher))
-        np.savetxt(PATH_TO_RESULTS + 'results/gwfish_m1_m2_from_mChirp_q/rotated_errors/' +
-                'Errors_%s_%s_BBH_%s_SNR1.0.txt' %(label, estimator, event), new_errors, delimiter = ' ', 
+        np.savetxt(PATH_TO_RESULTS + 'results/gwfish_rotated/' +
+                get_label(detectors_list, event, estimator, 'errors'), new_errors, delimiter = ' ', 
                 fmt = '%.15f', header = '# ' + ' '.join(new_errors.keys()), comments = '')
 
 
-def get_samples_from_MVN(means, cov, N):
-    """
-    Draw samples from a multivariate normal distribution
-    """
-    return np.random.multivariate_normal(means, cov, N)
+def get_label(detectors_list, event, estimator, name_tag):
+    detectors_labels = list(detectors_list[event])
+    connector = '_'
+    network_lbs = detectors_labels[0]
+    for j in range(1, len(detectors_labels)):
+        network_lbs += connector + detectors_labels[j]
+    if name_tag == 'errors':
+        label = 'Errors_%s_%s_BBH_%s_SNR1.txt' %(network_lbs, estimator, event)
+    elif name_tag == 'fishers':
+        label = 'fisher_matrices_%s_%s_BBH_%s_SNR1.npy' %(network_lbs, estimator, event)
+    elif name_tag == 'inv_fishers':
+        label = 'inv_fisher_matrices_%s_%s_BBH_%s_SNR1.npy' %(network_lbs, estimator, event)
+    return label
 
 def get_samples_from_TMVN(min_array, max_array, means, cov, N):
     """
@@ -281,14 +286,44 @@ def get_samples_from_TMVN(min_array, max_array, means, cov, N):
     tmvn = TruncatedMVN(means, cov, min_array, max_array)
     return tmvn.sample(N)
 
-def get_posteriors(samples, params, priors_dict, min_array, max_array, N):
+def get_posteriors(samples, priors_dict, N):
     """
     Draw samples from a multivariate normal distribution with priors
     """
-    samples['priors'] = np.ones_like(samples[params[0]])
-    for param in params:
-        samples['priors'] *= priors_dict[param](samples[param], lower_bound = min_array[param], upper_bound = max_array[param])
-
+    samples['priors'] = priors.uniform_pdf(samples['chirp_mass'].to_numpy(), priors_dict['chirp_mass'][0], priors_dict['chirp_mass'][1])*\
+                        priors.uniform_pdf(samples['mass_ratio'].to_numpy(), priors_dict['mass_ratio'][0], priors_dict['mass_ratio'][1])*\
+                        priors.uniform_in_distance_squared_pdf(samples['luminosity_distance'].to_numpy(), priors_dict['luminosity_distance'][0], priors_dict['luminosity_distance'][1])*\
+                        priors.uniform_in_cosine_pdf(samples['dec'].to_numpy(), priors_dict['dec'][0], priors_dict['dec'][1])*\
+                        priors.uniform_pdf(samples['ra'].to_numpy(), priors_dict['ra'][0], priors_dict['ra'][1])*\
+                        priors.uniform_in_sine_pdf(samples['theta_jn'].to_numpy(), priors_dict['theta_jn'][0], priors_dict['theta_jn'][1])*\
+                        priors.uniform_pdf(samples['psi'].to_numpy(), priors_dict['psi'][0], priors_dict['psi'][1])*\
+                        priors.uniform_pdf(samples['phase'].to_numpy(), priors_dict['phase'][0], priors_dict['phase'][1])*\
+                        priors.uniform_pdf(samples['geocent_time'].to_numpy(), priors_dict['geocent_time'][0], priors_dict['geocent_time'][1])*\
+                        priors.uniform_pdf(samples['a_1'].to_numpy(), priors_dict['a_1'][0], priors_dict['a_1'][1])*\
+                        priors.uniform_pdf(samples['a_2'].to_numpy(), priors_dict['a_2'][0], priors_dict['a_2'][1])*\
+                        priors.uniform_in_sine_pdf(samples['tilt_1'].to_numpy(), priors_dict['tilt_1'][0], priors_dict['tilt_1'][1])*\
+                        priors.uniform_in_sine_pdf(samples['tilt_2'].to_numpy(), priors_dict['tilt_2'][0], priors_dict['tilt_2'][1])*\
+                        priors.uniform_pdf(samples['phi_12'].to_numpy(), priors_dict['phi_12'][0], priors_dict['phi_12'][1])*\
+                        priors.uniform_pdf(samples['phi_jl'].to_numpy(), priors_dict['phi_jl'][0], priors_dict['phi_jl'][1])
+    '''
+    priors_results = {
+        'chirp_mass': priors.uniform_pdf(samples['chirp_mass'].to_numpy(), priors_dict['chirp_mass'][0], priors_dict['chirp_mass'][1]),
+        'mass_ratio': priors.uniform_pdf(samples['mass_ratio'].to_numpy(), priors_dict['mass_ratio'][0], priors_dict['mass_ratio'][1]),
+        'luminosity_distance': priors.uniform_in_distance_squared_pdf(samples['luminosity_distance'].to_numpy(), priors_dict['luminosity_distance'][0], priors_dict['luminosity_distance'][1]),
+        'dec': priors.uniform_in_cosine_pdf(samples['dec'].to_numpy(), priors_dict['dec'][0], priors_dict['dec'][1]),
+        'ra': priors.uniform_pdf(samples['ra'].to_numpy(), priors_dict['ra'][0], priors_dict['ra'][1]),
+        'theta_jn': priors.uniform_in_sine_pdf(samples['theta_jn'].to_numpy(), priors_dict['theta_jn'][0], priors_dict['theta_jn'][1]),
+        'psi': priors.uniform_pdf(samples['psi'].to_numpy(), priors_dict['psi'][0], priors_dict['psi'][1]),
+        'phase': priors.uniform_pdf(samples['phase'].to_numpy(), priors_dict['phase'][0], priors_dict['phase'][1]),
+        'geocent_time': priors.uniform_pdf(samples['geocent_time'].to_numpy(), priors_dict['geocent_time'][0], priors_dict['geocent_time'][1]),
+        'a_1': priors.uniform_pdf(samples['a_1'].to_numpy(), priors_dict['a_1'][0], priors_dict['a_1'][1]),
+        'a_2': priors.uniform_pdf(samples['a_2'].to_numpy(), priors_dict['a_2'][0], priors_dict['a_2'][1]),
+        'tilt_1': priors.uniform_in_sine_pdf(samples['tilt_1'].to_numpy(), priors_dict['tilt_1'][0], priors_dict['tilt_1'][1]),
+        'tilt_2': priors.uniform_in_sine_pdf(samples['tilt_2'].to_numpy(), priors_dict['tilt_2'][0], priors_dict['tilt_2'][1]),
+        'phi_12': priors.uniform_pdf(samples['phi_12'].to_numpy(), priors_dict['phi_12'][0], priors_dict['phi_12'][1]),
+        'phi_jl': priors.uniform_pdf(samples['phi_jl'].to_numpy(), priors_dict['phi_jl'][0], priors_dict['phi_jl'][1])
+    }
+    '''
     samples['weights'] = samples['priors'] / np.sum(samples['priors'])
     prob = samples['weights'].to_numpy()
     index = np.random.choice(np.arange(N), size = N, replace = True, p = prob)
@@ -296,9 +331,24 @@ def get_posteriors(samples, params, priors_dict, min_array, max_array, N):
     
     return posteriors
 
-def get_lvk_samples():
+def get_lvk_samples(PATH_TO_LVK_DATA, event, params):
     """
     Get the LVK samples
     """
-    samples = pd.read_hdf(PATH_TO_IN
+    data = h5py.File(PATH_TO_LVK_DATA + event + '.h5', 'r')
+    samples_lvk = {}
+    for l in range(len(params)):
+        samples_lvk[params[l]] = data['C01:IMRPhenomXPHM']['posterior_samples'][params[l]]
+
+    return samples_lvk
+
+def get_confidence_interval(samples, params, confidence_level):
+    """
+    Compute the confidence intervals
+    """
+    confidence_level /= 100
+    conf_int = {}
+    for param in params:
+        conf_int[param] = np.percentile(samples[param], [100 * (1 - confidence_level) / 2, 100 * (1 + confidence_level) / 2])
+    return conf_int
 
