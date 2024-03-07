@@ -165,7 +165,7 @@ def gwfish_analysis(PATH_TO_YAML, PATH_TO_INJECTIONS, events_list, waveform, est
         gw_parameters = pd.read_hdf(PATH_TO_INJECTIONS + event +  '/%s_%s_%s.hdf5' %(event, waveform, estimator))
         gw_parameters['mass1_lvk'] = gw_parameters['mass_1']
         gw_parameters['mass2_lvk'] = gw_parameters['mass_2']
-        gw_parameters['mass_1'], gw_parameters['mass_2'] = from_mChirp_q_to_m1_m2(gw_parameters['chirp_mass'], gw_parameters['mass_ratio'])
+        gw_parameters['mass_1'], gw_parameters['mass_2'] = from_mChirp_q_to_m1_m2(gw_parameters['chirp_mass'][0], gw_parameters['mass_ratio'][0])
 
         network = gw.detection.Network(detectors_ids, detection_SNR=(0., 1.), config=ConfigDet)
         gw.fishermatrix.analyze_and_save_to_txt(network = network,
@@ -175,7 +175,8 @@ def gwfish_analysis(PATH_TO_YAML, PATH_TO_INJECTIONS, events_list, waveform, est
                                         population_name = population,
                                         waveform_model = waveform_model,
                                         save_path = PATH_TO_RESULTS,
-                                        save_matrices = True)
+                                        save_matrices = True,
+                                        decimal_output_format='%.15f')
 
 
 
