@@ -189,6 +189,9 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
 
 
 def get_label(detectors_list, event, estimator, snr_thr, name_tag, additional_tag = None):
+    """
+    Provide fast way to create labels and retrieve file names
+    """
     detectors_labels = list(detectors_list[event])
     connector = '_'
     network_lbs = detectors_labels[0]
