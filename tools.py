@@ -15,66 +15,111 @@ import priors
 
 
 def keys(f):
+    """
+    Get the keys of a hdf5 file
+    """
     return [key for key in f.keys()]
 
 
-def create_injections_from_gwtc(PATH_TO_DATA, PATH_TO_RESULTS, waveform, params, estimator):
+
+def get_events_list(PATH_TO_DATA, PATH_TO_RESULTS, waveform = 'IMRPhenomXPHM'):
     """
-    Load the GWTC catalogs and create a list of events for which the estimator is not None
-    The list of events is saved in a txt file (as well as the discareded ones)
+    Get the list of events in the data directory
+    satisfying the following criteria:
+    - The event has the waveform IMRPhenomXPHM
+    - The event has the estimator (median and/or maxP)
+    - The event has the analytic priors
+    """
+    all_events = []
+    events_without_wf = []
+    events_without_median = []
+    events_without_maxP = []
+    events_without_priors = []
+    events_wf_median_priors = []
+    events_wf_maxP_priors = []
+    events_wf_median_maxP_priors = []
+
+    for file in os.listdir(PATH_TO_DATA):
+        data_pesum = read(PATH_TO_DATA + file, package = 'core')
+        data = h5py.File(PATH_TO_DATA + file, 'r') 
+        if 'C01:' + waveform not in data_pesum.samples_dict.keys():
+            events_without_wf.append(file[:-3])
+        else:
+            # try with one of the parameters to see if the estimator is None
+            if data_pesum.samples_dict['C01:' + waveform].key_data['mass_1']['median'] == None:
+                events_without_median.append(file[:-3])
+            if data_pesum.samples_dict['C01:' + waveform].key_data['mass_1']['maxP'] == None:
+                events_without_maxP.append(file[:-3])
+            if 'analytic' not in data['C01:' + waveform]['priors'].keys(): 
+                events_without_priors.append(file[:-3])
+            if data_pesum.samples_dict['C01:' + waveform].key_data['mass_1']['median'] != None\
+               and 'analytic' in data['C01:' + waveform]['priors'].keys():
+                events_wf_median_priors.append(file[:-3])
+            if data_pesum.samples_dict['C01:' + waveform].key_data['mass_1']['maxP'] != None\
+                and 'analytic' in data['C01:' + waveform]['priors'].keys():
+                 events_wf_maxP_priors.append(file[:-3])
+            if data_pesum.samples_dict['C01:' + waveform].key_data['mass_1']['median'] != None\
+                and data_pesum.samples_dict['C01:' + waveform].key_data['mass_1']['maxP'] != None\
+                and 'analytic' in data['C01:' + waveform]['priors'].keys():
+                events_wf_median_maxP_priors.append(file[:-3])
+
+    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_without_wf_%s.txt' %waveform, events_without_wf, fmt = '%s')
+    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_without_median_%s.txt' %waveform, events_without_median, fmt = '%s')
+    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_without_maxP_%s.txt' %waveform, events_without_maxP, fmt = '%s')
+    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_without_priors_%s.txt' %waveform, events_without_priors, fmt = '%s')
+    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_wf_median_priors_%s.txt' %waveform, events_wf_median_priors, fmt = '%s')
+    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_wf_maxP_priors_%s.txt' %waveform, events_wf_maxP_priors, fmt = '%s')
+    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_wf_median_maxP_priors_%s.txt' %waveform, events_wf_median_maxP_priors, fmt = '%s')
+
+            
+
+def get_injections_from_gwtc(PATH_TO_DATA, PATH_TO_INJECTIONS, events_list, waveform, params, estimator):
+    """
+    Load the GWTC data and extract the injections
     The injections are saved in a hdf5 file
         --> Specify the PATH_TO_DATA and PATH_TO_RESULTS
         --> Specify the waveform, the parameters and the estimator
     The DATA are assumed to be in the LVK format as can be downloaded from Zenodo
     """
 
-    event_list = []
-    no_waveform_list = []
-    discarded_events_list = []
-    for file in os.listdir(PATH_TO_DATA):
-        data_pesum = read(PATH_TO_DATA + file, package = 'core')
-        if 'C01:' + waveform not in data_pesum.samples_dict.keys():
-            no_waveform_list.append(file[:-3])
-        else:
-            if data_pesum.samples_dict['C01:' + waveform].key_data[params[0]][estimator] != None:
-                event_list.append(file[:-3])
-                # Create the injections
-                estimator_dict = {}
-                for param in params:
-                    estimator_dict[param] = data_pesum.samples_dict['C01:' + waveform].key_data[param][estimator]
-                PATH_TO_INJECTIONS = PATH_TO_RESULTS + 'injections/' + file[:-3]
-                if not os.path.exists(PATH_TO_INJECTIONS):
-                    os.makedirs(PATH_TO_INJECTIONS)
-                estimator_df = pd.DataFrame([estimator_dict], columns = params)
-                estimator_df.to_hdf(PATH_TO_INJECTIONS + '/%s_%s_%s.hdf5' %(file[:-3], waveform, estimator), key = 'data', mode = 'w')
-            else:
-                discarded_events_list.append(file[:-3])
-
-    np.savetxt(PATH_TO_RESULTS + 'info/' + 'event_list_%s_%s.txt' %(waveform, estimator), event_list, fmt = '%s')
-    np.savetxt(PATH_TO_RESULTS + 'info/' + '%s_not_in_list_for_%s.txt' %(estimator, waveform), discarded_events_list, fmt = '%s')
-    np.savetxt(PATH_TO_RESULTS + 'info/' + 'waveform_not_in_list_%s.txt' %waveform, no_waveform_list, fmt = '%s')
+    for event in events_list:
+        data = read(PATH_TO_DATA + event + '.h5', package = 'core')
+        # Create the injections
+        estimator_dict = {}
+        for param in params:
+            estimator_dict[param] = data.samples_dict['C01:' + waveform].key_data[param][estimator]
+        if not os.path.exists(PATH_TO_INJECTIONS + event):
+            os.makedirs(PATH_TO_INJECTIONS + event)
+        estimator_df = pd.DataFrame([estimator_dict], columns = params)
+        estimator_df.to_hdf(PATH_TO_INJECTIONS + event + '/%s_%s_%s.hdf5' %(event, waveform, estimator), key = 'data', mode = 'w')
 
 
-def check_and_store_priors(PATH_TO_DATA, PATH_TO_RESULTS, events_list, waveform):
-    events_with_priors = []
-    events_with_no_priors = []
+
+def check_and_store_chirp_mass_priors(PATH_TO_DATA, PATH_TO_RESULTS, events_list, waveform):
     chirp_mass_priors = {}
     for event in events_list:
         data = h5py.File(PATH_TO_DATA + event + '.h5', 'r') 
-        if 'analytic' in data['C01:' + waveform]['priors'].keys():
-            events_with_priors.append(event)
-            string_ov = data['C01:' + waveform]['priors']['analytic']['chirp_mass'][0].decode('utf-8')
-            new_string = string_ov.replace('=', ',').split(',')
-            min_chirp_mass = new_string[1]
-            max_chirp_mass = new_string[3]
-            chirp_mass_priors[event] = [min_chirp_mass, max_chirp_mass]
-        else:
-            events_with_no_priors.append(event)
+        string_ov = data['C01:' + waveform]['priors']['analytic']['chirp_mass'][0].decode('utf-8')
+        new_string = string_ov.replace('=', ',').split(',')
+        min_chirp_mass = new_string[1]
+        max_chirp_mass = new_string[3]
+        chirp_mass_priors[event] = [min_chirp_mass, max_chirp_mass]
 
-    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_with_priors_%s.txt' %waveform, events_with_priors, fmt = '%s')
-    np.savetxt(PATH_TO_RESULTS + 'info/' + 'events_with_no_priors_%s.txt' %waveform, events_with_no_priors, fmt = '%s')
     with open(PATH_TO_RESULTS + 'info/' + 'chirp_mass_priors_%s.pkl' %waveform, 'wb') as f:
         pickle.dump(chirp_mass_priors, f)
+
+def check_and_store_geocent_time_priors(PATH_TO_LVK_DATA, PATH_TO_RESULTS, events, waveform):
+    geocent_time_priors = {}
+    for event in events:
+        data = h5py.File(PATH_TO_LVK_DATA + event + '.h5', 'r')
+        string_ov = data['C01:' + waveform]['priors']['analytic']['geocent_time'][0].decode('utf-8')
+        new_string = string_ov.replace('=', ',').split(',')
+        min_geocent_time = new_string[1]
+        max_geocent_time = new_string[3]
+        geocent_time_priors[event] = [min_geocent_time, max_geocent_time]
+
+    with open(PATH_TO_RESULTS + 'info/' + 'geocent_time_priors_%s.pkl' %waveform, 'wb') as f:
+        pickle.dump(geocent_time_priors, f)
 
 def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_TO_PSD, events_list, waveform):
 
@@ -85,8 +130,8 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
                     'duty_factor':0.85,
                     'detector_class':'earthL',
                     'plotrange':'10, 1000, 1e-25, 1e-20',
-                    'fmin':8,
-                    'fmax':1024,
+                    'fmin':2,
+                    'fmax':2048,
                     'spacing':'geometric',
                     'df':1/4,
                     'npoints':5000
@@ -98,8 +143,8 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
                     'duty_factor':0.85,
                     'detector_class':'earthL',
                     'plotrange':'10, 1000, 1e-25, 1e-20',
-                    'fmin':8,
-                    'fmax':1024,
+                    'fmin':2,
+                    'fmax':2048,
                     'spacing':'geometric',
                     'df':1/4,
                     'npoints':5000
@@ -111,8 +156,8 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
                     'duty_factor':0.85,
                     'detector_class':'earthL',
                     'plotrange':'10, 1000, 1e-25, 1e-20',
-                    'fmin':8,
-                    'fmax':1024,
+                    'fmin':2,
+                    'fmax':2048,
                     'spacing':'geometric',
                     'df':1/4,
                     'npoints':5000
@@ -143,38 +188,62 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
 
 
 
-def gwfish_analysis(PATH_TO_YAML, PATH_TO_INJECTIONS, events_list, waveform, estimator,
-                    detectors, fisher_parameters, PATH_TO_RESULTS):
+def get_label(detectors_list, event, estimator, snr_thr, name_tag, additional_tag = None):
+    detectors_labels = list(detectors_list[event])
+    connector = '_'
+    network_lbs = detectors_labels[0]
+    for j in range(1, len(detectors_labels)):
+        network_lbs += connector + detectors_labels[j]
+    if name_tag == 'errors':
+        if additional_tag == None:
+            label = 'Errors_%s_%s_BBH_%s_SNR%s.txt' %(network_lbs, estimator, event, snr_thr)
+        else:
+            label = 'Errors_%s_%s_%s_BBH_%s_SNR%s.txt' %(network_lbs, estimator, additional_tag, event, snr_thr)
+    elif name_tag == 'fishers':
+        if additional_tag == None:
+            label = 'fisher_matrices_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, event, snr_thr)
+        else:
+            label = 'fisher_matrices_%s_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, additional_tag, event, snr_thr)
+    elif name_tag == 'inv_fishers':
+        if additional_tag == None:
+            label = 'inv_fisher_matrices_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, event, snr_thr)
+        else:
+            label = 'inv_fisher_matrices_%s_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, additional_tag, event, snr_thr)
+    return label
+
+
+
+def gwfish_analysis(PATH_TO_INJECTIONS, PATH_TO_YAML, PATH_TO_RESULTS, events_list, waveform, estimator,
+                    detectors, fisher_parameters):
 
     for event in events_list:
-        population = '%s_BBH_%s' %(estimator, event)
+        name_tag = '%s_BBH_%s' %(estimator, event)
 
         detectors_list = detectors[event]
         detectors_event = []
         for j in range(len(detectors_list)):
             detectors_event.append(detectors_list[j])
         networks = np.linspace(0, len(detectors_event) - 1, len(detectors_event), dtype=int)
-        networks = str([networks.tolist()])
+        list_all_networks = []
+        for i in range(len(networks)):
+            list_all_networks.append([networks[i].tolist()])
+        list_all_networks.append(networks.tolist()) 
+        networks = str(list_all_networks)
 
         detectors_ids = np.array(detectors_event)
         networks_ids = json.loads(networks)
         ConfigDet = os.path.join(PATH_TO_YAML + event + '.yaml')
 
-
-        waveform_model = waveform
         gw_parameters = pd.read_hdf(PATH_TO_INJECTIONS + event +  '/%s_%s_%s.hdf5' %(event, waveform, estimator))
-        gw_parameters['mass1_lvk'] = gw_parameters['mass_1']
-        gw_parameters['mass2_lvk'] = gw_parameters['mass_2']
-        gw_parameters['mass_1'], gw_parameters['mass_2'] = from_mChirp_q_to_m1_m2(gw_parameters['chirp_mass'][0], gw_parameters['mass_ratio'][0])
 
-        network = gw.detection.Network(detectors_ids, detection_SNR=(0., 1.), config=ConfigDet)
+        network = gw.detection.Network(detectors_ids, detection_SNR=(0., 0.), config=ConfigDet)
         gw.fishermatrix.analyze_and_save_to_txt(network = network,
                                         parameter_values  = gw_parameters,
                                         fisher_parameters = fisher_parameters, 
                                         sub_network_ids_list = networks_ids,
-                                        population_name = population,
-                                        waveform_model = waveform_model,
-                                        save_path = PATH_TO_RESULTS,
+                                        population_name = name_tag,
+                                        waveform_model = waveform,
+                                        save_path = PATH_TO_RESULTS + event +'/',
                                         save_matrices = True,
                                         decimal_output_format='%.15f')
 
@@ -188,6 +257,8 @@ def from_m1_m2_to_mChirp_q(m1, m2):
     q = m2 / m1
     return mChirp, q
 
+
+
 def from_mChirp_q_to_m1_m2(mChirp, q):
     """
     Compute the transformation from mChirp, q to m1, m2
@@ -195,6 +266,8 @@ def from_mChirp_q_to_m1_m2(mChirp, q):
     m1 = mChirp * (1 + q)**(1/5) * q**(-3/5)
     m2 = mChirp * (1 + q)**(1/5) * q**(2/5)
     return m1, m2
+
+
 
 def derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q):
     """
@@ -205,6 +278,7 @@ def derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q):
     dm2_dmChirp = (1 + q)**(1/5) * q**(2/5)
     dm2_dq = mChirp * (1 + q)**(1/5) * (2/5) * q**(-3/5) + mChirp * (1/5) * (1 + q)**(-4/5) * q**(2/5)
     return dm1_dmChirp, dm1_dq, dm2_dmChirp, dm2_dq
+
 
 
 def jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2, fisher_matrix):
@@ -225,14 +299,9 @@ def jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2, fisher_matrix):
 
     rotated_fisher = jacobian_matrix[0, :, :].T @ rotated_fisher[0, :, :] @ jacobian_matrix[0, :, :]
 
-    #nparams = len(fisher_parameters)
-    #jacobian = np.identity((nparams))
-
-    #jacobian[np.ix_([fisher_parameters.index('mass_1'), fisher_parameters.index('mass_1')], [fisher_parameters.index('mass_1'), fisher_parameters.index('mass_1')])] = derivative_m1_m2_dmChirp_dq(m1, m2, mChirp, q)
-
-    # Write the jacobian matrix to pass from the fisher matrix in m1 and m2 to fisher in mChirp and q
-    #rotated_fisher = jacobian.T@old_fisher@jacobian
     return rotated_fisher[np.newaxis, :, :]
+
+
 
 def get_rotated_fisher_matrix(PATH_TO_RESULTS, events_list, detectors_list, estimator, lbs_errs, new_fisher_parameters):
    
@@ -266,19 +335,6 @@ def get_rotated_fisher_matrix(PATH_TO_RESULTS, events_list, detectors_list, esti
                 fmt = '%.15f', header = '# ' + ' '.join(new_errors.keys()), comments = '')
 
 
-def get_label(detectors_list, event, estimator, name_tag):
-    detectors_labels = list(detectors_list[event])
-    connector = '_'
-    network_lbs = detectors_labels[0]
-    for j in range(1, len(detectors_labels)):
-        network_lbs += connector + detectors_labels[j]
-    if name_tag == 'errors':
-        label = 'Errors_%s_%s_BBH_%s_SNR1.txt' %(network_lbs, estimator, event)
-    elif name_tag == 'fishers':
-        label = 'fisher_matrices_%s_%s_BBH_%s_SNR1.npy' %(network_lbs, estimator, event)
-    elif name_tag == 'inv_fishers':
-        label = 'inv_fisher_matrices_%s_%s_BBH_%s_SNR1.npy' %(network_lbs, estimator, event)
-    return label
 
 def get_samples_from_TMVN(min_array, max_array, means, cov, N):
     """
@@ -287,6 +343,8 @@ def get_samples_from_TMVN(min_array, max_array, means, cov, N):
     tmvn = TruncatedMVN(means, cov, min_array, max_array)
     return tmvn.sample(N)
 
+
+
 def get_posteriors(samples, priors_dict, N):
     """
     Draw samples from a multivariate normal distribution with priors
@@ -294,43 +352,27 @@ def get_posteriors(samples, priors_dict, N):
     samples['priors'] = priors.uniform_pdf(samples['chirp_mass'].to_numpy(), priors_dict['chirp_mass'][0], priors_dict['chirp_mass'][1])*\
                         priors.uniform_pdf(samples['mass_ratio'].to_numpy(), priors_dict['mass_ratio'][0], priors_dict['mass_ratio'][1])*\
                         priors.uniform_in_distance_squared_pdf(samples['luminosity_distance'].to_numpy(), priors_dict['luminosity_distance'][0], priors_dict['luminosity_distance'][1])*\
-                        priors.uniform_in_cosine_pdf(samples['dec'].to_numpy(), priors_dict['dec'][0], priors_dict['dec'][1])*\
+                        priors.cosine_pdf(samples['dec'].to_numpy(), priors_dict['dec'][0], priors_dict['dec'][1])*\
                         priors.uniform_pdf(samples['ra'].to_numpy(), priors_dict['ra'][0], priors_dict['ra'][1])*\
-                        priors.uniform_in_sine_pdf(samples['theta_jn'].to_numpy(), priors_dict['theta_jn'][0], priors_dict['theta_jn'][1])*\
+                        priors.sine_pdf(samples['theta_jn'].to_numpy(), priors_dict['theta_jn'][0], priors_dict['theta_jn'][1])*\
                         priors.uniform_pdf(samples['psi'].to_numpy(), priors_dict['psi'][0], priors_dict['psi'][1])*\
                         priors.uniform_pdf(samples['phase'].to_numpy(), priors_dict['phase'][0], priors_dict['phase'][1])*\
                         priors.uniform_pdf(samples['geocent_time'].to_numpy(), priors_dict['geocent_time'][0], priors_dict['geocent_time'][1])*\
                         priors.uniform_pdf(samples['a_1'].to_numpy(), priors_dict['a_1'][0], priors_dict['a_1'][1])*\
                         priors.uniform_pdf(samples['a_2'].to_numpy(), priors_dict['a_2'][0], priors_dict['a_2'][1])*\
-                        priors.uniform_in_sine_pdf(samples['tilt_1'].to_numpy(), priors_dict['tilt_1'][0], priors_dict['tilt_1'][1])*\
-                        priors.uniform_in_sine_pdf(samples['tilt_2'].to_numpy(), priors_dict['tilt_2'][0], priors_dict['tilt_2'][1])*\
+                        priors.sine_pdf(samples['tilt_1'].to_numpy(), priors_dict['tilt_1'][0], priors_dict['tilt_1'][1])*\
+                        priors.sine_pdf(samples['tilt_2'].to_numpy(), priors_dict['tilt_2'][0], priors_dict['tilt_2'][1])*\
                         priors.uniform_pdf(samples['phi_12'].to_numpy(), priors_dict['phi_12'][0], priors_dict['phi_12'][1])*\
                         priors.uniform_pdf(samples['phi_jl'].to_numpy(), priors_dict['phi_jl'][0], priors_dict['phi_jl'][1])
-    '''
-    priors_results = {
-        'chirp_mass': priors.uniform_pdf(samples['chirp_mass'].to_numpy(), priors_dict['chirp_mass'][0], priors_dict['chirp_mass'][1]),
-        'mass_ratio': priors.uniform_pdf(samples['mass_ratio'].to_numpy(), priors_dict['mass_ratio'][0], priors_dict['mass_ratio'][1]),
-        'luminosity_distance': priors.uniform_in_distance_squared_pdf(samples['luminosity_distance'].to_numpy(), priors_dict['luminosity_distance'][0], priors_dict['luminosity_distance'][1]),
-        'dec': priors.uniform_in_cosine_pdf(samples['dec'].to_numpy(), priors_dict['dec'][0], priors_dict['dec'][1]),
-        'ra': priors.uniform_pdf(samples['ra'].to_numpy(), priors_dict['ra'][0], priors_dict['ra'][1]),
-        'theta_jn': priors.uniform_in_sine_pdf(samples['theta_jn'].to_numpy(), priors_dict['theta_jn'][0], priors_dict['theta_jn'][1]),
-        'psi': priors.uniform_pdf(samples['psi'].to_numpy(), priors_dict['psi'][0], priors_dict['psi'][1]),
-        'phase': priors.uniform_pdf(samples['phase'].to_numpy(), priors_dict['phase'][0], priors_dict['phase'][1]),
-        'geocent_time': priors.uniform_pdf(samples['geocent_time'].to_numpy(), priors_dict['geocent_time'][0], priors_dict['geocent_time'][1]),
-        'a_1': priors.uniform_pdf(samples['a_1'].to_numpy(), priors_dict['a_1'][0], priors_dict['a_1'][1]),
-        'a_2': priors.uniform_pdf(samples['a_2'].to_numpy(), priors_dict['a_2'][0], priors_dict['a_2'][1]),
-        'tilt_1': priors.uniform_in_sine_pdf(samples['tilt_1'].to_numpy(), priors_dict['tilt_1'][0], priors_dict['tilt_1'][1]),
-        'tilt_2': priors.uniform_in_sine_pdf(samples['tilt_2'].to_numpy(), priors_dict['tilt_2'][0], priors_dict['tilt_2'][1]),
-        'phi_12': priors.uniform_pdf(samples['phi_12'].to_numpy(), priors_dict['phi_12'][0], priors_dict['phi_12'][1]),
-        'phi_jl': priors.uniform_pdf(samples['phi_jl'].to_numpy(), priors_dict['phi_jl'][0], priors_dict['phi_jl'][1])
-    }
-    '''
+    
     samples['weights'] = samples['priors'] / np.sum(samples['priors'])
     prob = samples['weights'].to_numpy()
     index = np.random.choice(np.arange(N), size = N, replace = True, p = prob)
     posteriors = samples.iloc[index]
     
     return posteriors
+
+
 
 def get_lvk_samples(PATH_TO_LVK_DATA, event, params):
     """
@@ -343,6 +385,8 @@ def get_lvk_samples(PATH_TO_LVK_DATA, event, params):
 
     return samples_lvk
 
+
+
 def get_confidence_interval(samples, params, confidence_level):
     """
     Compute the confidence intervals
@@ -351,5 +395,6 @@ def get_confidence_interval(samples, params, confidence_level):
     conf_int = {}
     for param in params:
         conf_int[param] = np.percentile(samples[param], [100 * (1 - confidence_level) / 2, 100 * (1 + confidence_level) / 2])
+    
     return conf_int
 
