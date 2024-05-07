@@ -1,3 +1,9 @@
+#    Copyright (c) 2024 Ulyana Dupletsa <ulyana.dupletsa@gssi.it>
+#
+#    All rights reserved. Use of this source code is governed by the
+#    license that can be found in the LICENSE file.
+
+
 import numpy as np
 import pandas as pd
 import h5py
@@ -96,6 +102,9 @@ def get_injections_from_gwtc(PATH_TO_DATA, PATH_TO_INJECTIONS, events_list, wave
 
 
 def check_and_store_chirp_mass_priors(PATH_TO_DATA, PATH_TO_RESULTS, events_list, waveform):
+    """
+    Check the chirp mass priors and store them in a dictionary
+    """
     chirp_mass_priors = {}
     for event in events_list:
         data = h5py.File(PATH_TO_DATA + event + '.h5', 'r') 
@@ -109,6 +118,9 @@ def check_and_store_chirp_mass_priors(PATH_TO_DATA, PATH_TO_RESULTS, events_list
         pickle.dump(chirp_mass_priors, f)
 
 def check_and_store_geocent_time_priors(PATH_TO_LVK_DATA, PATH_TO_RESULTS, events, waveform):
+    """
+    Check the geocent time priors and store them in a dictionary
+    """
     geocent_time_priors = {}
     for event in events:
         data = h5py.File(PATH_TO_LVK_DATA + event + '.h5', 'r')
@@ -122,7 +134,10 @@ def check_and_store_geocent_time_priors(PATH_TO_LVK_DATA, PATH_TO_RESULTS, event
         pickle.dump(geocent_time_priors, f)
 
 def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_TO_PSD, events_list, waveform):
-
+    """
+    Store information about detectors in .yaml files
+    """
+    # Create generic dictionary template in the format taken in GWFish
     dict_template = {'L1':{'lat':30.56 * np.pi / 180.,
                     'lon':-90.77 * np.pi / 180.,
                     'opening_angle':np.pi / 2.,
@@ -218,6 +233,9 @@ def get_label(detectors_list, event, estimator, snr_thr, name_tag, additional_ta
 
 def gwfish_analysis(PATH_TO_INJECTIONS, PATH_TO_YAML, PATH_TO_RESULTS, events_list, waveform, estimator,
                     detectors, fisher_parameters):
+    """
+    Perform the Fisher matrix analysis using GWFish
+    """
 
     for event in events_list:
         name_tag = '%s_BBH_%s' %(estimator, event)
@@ -307,6 +325,9 @@ def jacobian_for_derivative_from_m1_m2_to_mChirp_q(m1, m2, fisher_matrix):
 
 
 def get_rotated_fisher_matrix(PATH_TO_RESULTS, events_list, detectors_list, estimator, lbs_errs, new_fisher_parameters):
+    """
+    Compute the rotated Fisher matrix from m1, m2 to mChirp, q
+    """
    
     for event in events_list:
 

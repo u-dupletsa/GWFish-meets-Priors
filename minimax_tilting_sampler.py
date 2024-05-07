@@ -1,3 +1,6 @@
+### TAKEN FROM https://github.com/brunzema/truncated-mvn-sampler?tab=readme-ov-file
+### Some modifications made at lines 60-63 to avoid changing the original input
+
 import numpy as np
 import math
 from scipy import special
@@ -53,6 +56,7 @@ class TruncatedMVN:
             raise RuntimeError("Dimensions D of mean (mu), covariance matric (cov), lower bound (lb) "
                                "and upper bound (ub) must be the same!")
 
+        # Create a safe copy of the input (DIFFERENCE WITH ORIGINAL CODE!!!)
         self.cov = cov.copy()
         self.orig_mu = mu.copy()
         self.orig_lb = lb.copy()
