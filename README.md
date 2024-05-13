@@ -1,4 +1,8 @@
 # GWFish-meets-Priors
+<p align="center">
+  <img src="gwfish_priors_white.png" width="200" title="Logo">
+</p>
+
 Post processing of Fisher matrix results from GWFish with physically informed priors.
 
 Please cite [GWFish+Priors](https://arxiv.org/abs/2404.16103) publication if you make use of the code:
