@@ -56,7 +56,7 @@ def sine_pdf(x, a = 0, b = np.pi):
     """
     return np.where(np.logical_and(x >= a, x <= b), 0.5 * np.sin(x), 0)
 
-def uniform_in_source_frame_pdf(x, a = 0.0001, b = 5):
+def uniform_in_source_frame_pdf(x, a = 10, b = 10000):
     """
     Calculate the probability density function (PDF) of a uniform distribution 
     in the differential comoving volume: 
@@ -74,15 +74,18 @@ def uniform_in_source_frame_pdf(x, a = 0.0001, b = 5):
 
     """
     # find the redshifts corresponding to the input luminosity distance values
-    zz = np.linspace(0.0001, 5, 1000)
+    # convert distance values a nd b to redshift
+    aa = z_at_value(cosmo.luminosity_distance, a * u.Mpc)
+    bb = z_at_value(cosmo.luminosity_distance, b * u.Mpc)
+    zz = np.linspace(aa, bb, 1000)
     dd = cosmo.luminosity_distance(zz).value
     z = np.interp(x, dd, zz)
     # norm_factor (so that probability sum up to 1) neglected
     # remember to divide const.c by 1000 to convert to km/s
-    return np.where(np.logical_and(z >= a, z <= b), 
+    return np.where(np.logical_and(z >= aa, z <= bb), 
                 cosmo.differential_comoving_volume(z).value * (x / (1 + z) + (const.c.value / 1000) * (1 + z) / (cosmo.H(0).value * cosmo.efunc(z)))**(-1) / (1 + z), 0)
 
-def uniform_in_comoving_volume_pdf(x, a = 0.0001, b = 5):
+def uniform_in_comoving_volume_pdf(x, a = 10, b = 10000):
     """
     Calculate the probability density function (PDF) of a uniform distribution 
     in the differential comoving volume: 
@@ -99,12 +102,15 @@ def uniform_in_comoving_volume_pdf(x, a = 0.0001, b = 5):
 
     """
     # find the redshifts corresponding to the input luminosity distance values
-    zz = np.linspace(0.0001, 5, 1000)
+    # convert distance values a nd b to redshift
+    aa = z_at_value(cosmo.luminosity_distance, a * u.Mpc)
+    bb = z_at_value(cosmo.luminosity_distance, b * u.Mpc)
+    zz = np.linspace(aa, bb, 1000)
     dd = cosmo.luminosity_distance(zz).value
     z = np.interp(x, dd, zz)
     # norm_factor (so that probability sum up to 1) neglected
     # remember to divide const.c by 1000 to convert to km/s
-    return np.where(np.logical_and(z >= a, z <= b), 
+    return np.where(np.logical_and(z >= aa, z <= bb), 
                 cosmo.differential_comoving_volume(z).value * (x / (1 + z) + (const.c.value / 1000) * (1 + z) / (cosmo.H(0).value * cosmo.efunc(z)))**(-1), 0)
 
 

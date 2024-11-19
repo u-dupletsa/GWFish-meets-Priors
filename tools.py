@@ -395,10 +395,11 @@ def get_posteriors(samples, priors_dict, N):
     Draw samples from a multivariate normal distribution with priors
     """
     # account for the fact that the prior on masses should be uniform in m1-m2 plane
+    #priors.uniform_in_distance_squared_pdf(samples['luminosity_distance'].to_numpy(), priors_dict['luminosity_distance'][0], priors_dict['luminosity_distance'][1])*\
     samples['priors'] = priors.uniform_pdf(samples['chirp_mass'].to_numpy(), priors_dict['chirp_mass'][0], priors_dict['chirp_mass'][1])*\
                         priors.uniform_pdf(samples['mass_ratio'].to_numpy(), priors_dict['mass_ratio'][0], priors_dict['mass_ratio'][1])*\
                         (samples['chirp_mass'].to_numpy()*(samples['mass_ratio'])**(-6./5.)*(1+samples['mass_ratio'].to_numpy())**(2/5))*\
-                        priors.uniform_in_distance_squared_pdf(samples['luminosity_distance'].to_numpy(), priors_dict['luminosity_distance'][0], priors_dict['luminosity_distance'][1])*\
+                        priors.uniform_in_source_frame_pdf(samples['luminosity_distance'].to_numpy(), priors_dict['luminosity_distance'][0], priors_dict['luminosity_distance'][1])*\
                         priors.cosine_pdf(samples['dec'].to_numpy(), priors_dict['dec'][0], priors_dict['dec'][1])*\
                         priors.uniform_pdf(samples['ra'].to_numpy(), priors_dict['ra'][0], priors_dict['ra'][1])*\
                         priors.sine_pdf(samples['theta_jn'].to_numpy(), priors_dict['theta_jn'][0], priors_dict['theta_jn'][1])*\
