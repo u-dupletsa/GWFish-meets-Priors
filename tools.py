@@ -149,7 +149,8 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
                     'fmax':2048,
                     'spacing':'geometric',
                     'df':1/4,
-                    'npoints':5000
+                    'npoints':5000,
+                    'arm_length': 4000
                     },
                'H1':{'lat':46.45 * np.pi / 180.,
                     'lon':-119.41 * np.pi / 180.,
@@ -162,7 +163,8 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
                     'fmax':2048,
                     'spacing':'geometric',
                     'df':1/4,
-                    'npoints':5000
+                    'npoints':5000,
+                    'arm_length': 4000
                     },
                 'V1':{'lat':43.63 * np.pi / 180.,
                     'lon':10.51 * np.pi / 180.,
@@ -175,7 +177,8 @@ def detectors_and_yaml_files(PATH_TO_DATA, PATH_TO_RESULTS, PATH_TO_YAML, PATH_T
                     'fmax':2048,
                     'spacing':'geometric',
                     'df':1/4,
-                    'npoints':5000
+                    'npoints':5000,
+                    'arm_length': 3000
                     }
             }
 
@@ -212,21 +215,39 @@ def get_label(detectors_list, event, estimator, snr_thr, name_tag, additional_ta
     network_lbs = detectors_labels[0]
     for j in range(1, len(detectors_labels)):
         network_lbs += connector + detectors_labels[j]
-    if name_tag == 'errors':
-        if additional_tag == None:
-            label = 'Errors_%s_%s_BBH_%s_SNR%s.txt' %(network_lbs, estimator, event, snr_thr)
-        else:
-            label = 'Errors_%s_%s_%s_BBH_%s_SNR%s.txt' %(network_lbs, estimator, additional_tag, event, snr_thr)
-    elif name_tag == 'fishers':
-        if additional_tag == None:
-            label = 'fisher_matrices_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, event, snr_thr)
-        else:
-            label = 'fisher_matrices_%s_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, additional_tag, event, snr_thr)
-    elif name_tag == 'inv_fishers':
-        if additional_tag == None:
-            label = 'inv_fisher_matrices_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, event, snr_thr)
-        else:
-            label = 'inv_fisher_matrices_%s_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, additional_tag, event, snr_thr)
+    if estimator == 'averaged':
+        if name_tag == 'errors':
+            if additional_tag == None:
+                label = 'Errors_%s_BBH_%s_SNR%s.txt' %(network_lbs, event, snr_thr)
+            else:
+                label = 'Errors_%s_%s_BBH_%s_SNR%s.txt' %(network_lbs, additional_tag, event, snr_thr)
+        elif name_tag == 'fishers':
+            if additional_tag == None:
+                label = 'fisher_matrices_%s_BBH_%s_SNR%s.npy' %(network_lbs, event, snr_thr)
+            else:
+                label = 'fisher_matrices_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, additional_tag, event, snr_thr)
+        elif name_tag == 'inv_fishers':
+            if additional_tag == None:
+                label = 'inv_fisher_matrices_%s_BBH_%s_SNR%s.npy' %(network_lbs, event, snr_thr)
+            else:
+                label = 'inv_fisher_matrices_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, additional_tag, event, snr_thr)
+
+    else:
+        if name_tag == 'errors':
+            if additional_tag == None:
+                label = 'Errors_%s_%s_BBH_%s_SNR%s.txt' %(network_lbs, estimator, event, snr_thr)
+            else:
+                label = 'Errors_%s_%s_%s_BBH_%s_SNR%s.txt' %(network_lbs, estimator, additional_tag, event, snr_thr)
+        elif name_tag == 'fishers':
+            if additional_tag == None:
+                label = 'fisher_matrices_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, event, snr_thr)
+            else:
+                label = 'fisher_matrices_%s_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, additional_tag, event, snr_thr)
+        elif name_tag == 'inv_fishers':
+            if additional_tag == None:
+                label = 'inv_fisher_matrices_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, event, snr_thr)
+            else:
+                label = 'inv_fisher_matrices_%s_%s_%s_BBH_%s_SNR%s.npy' %(network_lbs, estimator, additional_tag, event, snr_thr)
     return label
 
 
@@ -373,8 +394,10 @@ def get_posteriors(samples, priors_dict, N):
     """
     Draw samples from a multivariate normal distribution with priors
     """
+    # account for the fact that the prior on masses should be uniform in m1-m2 plane
     samples['priors'] = priors.uniform_pdf(samples['chirp_mass'].to_numpy(), priors_dict['chirp_mass'][0], priors_dict['chirp_mass'][1])*\
                         priors.uniform_pdf(samples['mass_ratio'].to_numpy(), priors_dict['mass_ratio'][0], priors_dict['mass_ratio'][1])*\
+                        (samples['chirp_mass'].to_numpy()*(samples['mass_ratio'])**(-6./5.)*(1+samples['mass_ratio'].to_numpy())**(2/5))*\
                         priors.uniform_in_distance_squared_pdf(samples['luminosity_distance'].to_numpy(), priors_dict['luminosity_distance'][0], priors_dict['luminosity_distance'][1])*\
                         priors.cosine_pdf(samples['dec'].to_numpy(), priors_dict['dec'][0], priors_dict['dec'][1])*\
                         priors.uniform_pdf(samples['ra'].to_numpy(), priors_dict['ra'][0], priors_dict['ra'][1])*\
@@ -388,7 +411,7 @@ def get_posteriors(samples, priors_dict, N):
                         priors.sine_pdf(samples['tilt_2'].to_numpy(), priors_dict['tilt_2'][0], priors_dict['tilt_2'][1])*\
                         priors.uniform_pdf(samples['phi_12'].to_numpy(), priors_dict['phi_12'][0], priors_dict['phi_12'][1])*\
                         priors.uniform_pdf(samples['phi_jl'].to_numpy(), priors_dict['phi_jl'][0], priors_dict['phi_jl'][1])
-    
+
     samples['weights'] = samples['priors'] / np.sum(samples['priors'])
     prob = samples['weights'].to_numpy()
     index = np.random.choice(np.arange(N), size = N, replace = True, p = prob)
@@ -422,3 +445,16 @@ def get_confidence_interval(samples, params, confidence_level):
     
     return conf_int
 
+
+def my_multivariate_normal(mean, cov, n_samples, epsilon = 1e-10):
+    """
+    Draw samples from a multivariate normal distribution
+    """
+
+    d = int(len(mean))
+    perturbed_cov = cov + epsilon * np.identity(d)
+    # Cholesky matrix
+    L = np.linalg.cholesky(perturbed_cov)
+    u = np.random.normal(loc = 0, scale = 1, size = d * n_samples).reshape(d, n_samples)
+
+    return np.squeeze(mean + L.dot(u).T)
